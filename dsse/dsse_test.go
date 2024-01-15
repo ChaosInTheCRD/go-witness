@@ -29,6 +29,7 @@ import (
 	"time"
 
 	"github.com/in-toto/go-witness/cryptoutil"
+	"github.com/in-toto/go-witness/timestamp"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -244,30 +245,28 @@ func TestTimestamp(t *testing.T) {
 		{t: time.Now().Add(128 * time.Hour)},
 	}
 
-	allTimestampers := make([]Timestamper, 0)
-	allTimestampVerifiers := make([]TimestampVerifier, 0)
+	allTimestampers := make([]timestamp.Timestamper, 0)
 	for _, expected := range expectedTimestampers {
 		allTimestampers = append(allTimestampers, expected)
-		allTimestampVerifiers = append(allTimestampVerifiers, expected)
 	}
 
 	for _, unexpected := range unexpectedTimestampers {
 		allTimestampers = append(allTimestampers, unexpected)
-		allTimestampVerifiers = append(allTimestampVerifiers, unexpected)
 	}
 
 	env, err := Sign("dummydata", bytes.NewReader([]byte("this is some dummy data")), SignWithSigners(s), SignWithTimestampers(allTimestampers...))
 	require.NoError(t, err)
 
-	approvedVerifiers, err := env.Verify(VerifyWithVerifiers(v), VerifyWithRoots(root), VerifyWithIntermediates(intermediate), VerifyWithTimestampVerifiers(allTimestampVerifiers...))
+	approvedVerifiers, err := env.Verify(VerifyWithVerifiers(v), VerifyWithRoots(root), VerifyWithIntermediates(intermediate), VerifyWithTimestampAuthorities(allTimestampers...))
 	require.NoError(t, err)
 	assert.Len(t, approvedVerifiers, 1)
-	assert.Len(t, approvedVerifiers[0].PassedTimestampVerifiers, len(expectedTimestampers))
-	assert.ElementsMatch(t, approvedVerifiers[0].PassedTimestampVerifiers, expectedTimestampers)
+	assert.Len(t, approvedVerifiers[0].TimestampAuthority, len(expectedTimestampers))
+	assert.ElementsMatch(t, approvedVerifiers[0].TimestampAuthority, expectedTimestampers)
 }
 
 type dummyTimestamper struct {
-	t time.Time
+	t   time.Time
+	url string
 }
 
 func (dt dummyTimestamper) Timestamp(context.Context, io.Reader) ([]byte, error) {
@@ -285,4 +284,8 @@ func (dt dummyTimestamper) Verify(ctx context.Context, ts io.Reader, sig io.Read
 	}
 
 	return dt.t, nil
+}
+
+func (dt dummyTimestamper) Url(ctx context.Context) string {
+	return dt.url
 }

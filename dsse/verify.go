@@ -18,22 +18,18 @@ import (
 	"bytes"
 	"context"
 	"crypto/x509"
-	"io"
 	"time"
 
 	"github.com/in-toto/go-witness/cryptoutil"
+	"github.com/in-toto/go-witness/timestamp"
 )
 
-type TimestampVerifier interface {
-	Verify(context.Context, io.Reader, io.Reader) (time.Time, error)
-}
-
 type verificationOptions struct {
-	roots              []*x509.Certificate
-	intermediates      []*x509.Certificate
-	verifiers          []cryptoutil.Verifier
-	threshold          int
-	timestampVerifiers []TimestampVerifier
+	roots                []*x509.Certificate
+	intermediates        []*x509.Certificate
+	verifiers            []cryptoutil.Verifier
+	threshold            int
+	timestampAuthorities []timestamp.Timestamper
 }
 
 type VerificationOption func(*verificationOptions)
@@ -62,15 +58,29 @@ func VerifyWithThreshold(threshold int) VerificationOption {
 	}
 }
 
-func VerifyWithTimestampVerifiers(verifiers ...TimestampVerifier) VerificationOption {
+func VerifyWithTimestampAuthorities(timestampers ...timestamp.Timestamper) VerificationOption {
 	return func(vo *verificationOptions) {
-		vo.timestampVerifiers = verifiers
+		vo.timestampAuthorities = timestampers
 	}
 }
 
 type PassedVerifier struct {
-	Verifier                 cryptoutil.Verifier
-	PassedTimestampVerifiers []TimestampVerifier
+	Verifier           cryptoutil.Verifier
+	TimestampAuthority TimestampInfo
+}
+
+type TimestampInfo struct {
+	Timestamp time.Time
+	URL       string
+}
+
+func VerifyOpts(verifiers []cryptoutil.Verifier, roots []*x509.Certificate, intermediates []*x509.Certificate, timestampers []timestamp.Timestamper) []VerificationOption {
+	return []VerificationOption{
+		VerifyWithVerifiers(verifiers...),
+		VerifyWithRoots(roots...),
+		VerifyWithIntermediates(intermediates...),
+		VerifyWithTimestampAuthorities(timestampers...),
+	}
 }
 
 func (e Envelope) Verify(opts ...VerificationOption) ([]PassedVerifier, error) {
@@ -86,61 +96,17 @@ func (e Envelope) Verify(opts ...VerificationOption) ([]PassedVerifier, error) {
 		return nil, ErrInvalidThreshold(options.threshold)
 	}
 
-	pae := preauthEncode(e.PayloadType, e.Payload)
 	if len(e.Signatures) == 0 {
 		return nil, ErrNoSignatures{}
 	}
 
-	matchingSigFound := false
+	pae := preauthEncode(e.PayloadType, e.Payload)
+
 	passedVerifiers := make([]PassedVerifier, 0)
 	for _, sig := range e.Signatures {
 		if sig.Certificate != nil && len(sig.Certificate) > 0 {
-			cert, err := cryptoutil.TryParseCertificate(sig.Certificate)
-			if err != nil {
-				continue
-			}
-
-			sigIntermediates := make([]*x509.Certificate, 0)
-			for _, int := range sig.Intermediates {
-				intCert, err := cryptoutil.TryParseCertificate(int)
-				if err != nil {
-					continue
-				}
-
-				sigIntermediates = append(sigIntermediates, intCert)
-			}
-
-			sigIntermediates = append(sigIntermediates, options.intermediates...)
-			if len(options.timestampVerifiers) == 0 {
-				if verifier, err := verifyX509Time(cert, sigIntermediates, options.roots, pae, sig.Signature, time.Now()); err == nil {
-					matchingSigFound = true
-					passedVerifiers = append(passedVerifiers, PassedVerifier{Verifier: verifier})
-				}
-			} else {
-				var passedVerifier cryptoutil.Verifier
-				passedTimestampVerifiers := []TimestampVerifier{}
-
-				for _, timestampVerifier := range options.timestampVerifiers {
-					for _, sigTimestamp := range sig.Timestamps {
-						timestamp, err := timestampVerifier.Verify(context.TODO(), bytes.NewReader(sigTimestamp.Data), bytes.NewReader(sig.Signature))
-						if err != nil {
-							continue
-						}
-
-						if verifier, err := verifyX509Time(cert, sigIntermediates, options.roots, pae, sig.Signature, timestamp); err == nil {
-							passedVerifier = verifier
-							passedTimestampVerifiers = append(passedTimestampVerifiers, timestampVerifier)
-						}
-					}
-				}
-
-				if len(passedTimestampVerifiers) > 0 {
-					matchingSigFound = true
-					passedVerifiers = append(passedVerifiers, PassedVerifier{
-						Verifier:                 passedVerifier,
-						PassedTimestampVerifiers: passedTimestampVerifiers,
-					})
-				}
+			if pvs, err := verifyX509Time(sig, pae, options); err == nil {
+				passedVerifiers = append(passedVerifiers, pvs...)
 			}
 		}
 
@@ -148,32 +114,78 @@ func (e Envelope) Verify(opts ...VerificationOption) ([]PassedVerifier, error) {
 			if verifier != nil {
 				if err := verifier.Verify(bytes.NewReader(pae), sig.Signature); err == nil {
 					passedVerifiers = append(passedVerifiers, PassedVerifier{Verifier: verifier})
-					matchingSigFound = true
 				}
 			}
 		}
 	}
 
-	if !matchingSigFound {
+	// NOTE: Should we still pursue this logic if we verified with certificates...?
+	if len(passedVerifiers) == 0 {
 		return nil, ErrNoMatchingSigs{}
-	}
-
-	if len(passedVerifiers) < options.threshold {
+	} else if len(passedVerifiers) < options.threshold {
 		return passedVerifiers, ErrThresholdNotMet{Theshold: options.threshold, Acutal: len(passedVerifiers)}
 	}
 
 	return passedVerifiers, nil
 }
 
-func verifyX509Time(cert *x509.Certificate, sigIntermediates, roots []*x509.Certificate, pae, sig []byte, trustedTime time.Time) (cryptoutil.Verifier, error) {
-	verifier, err := cryptoutil.NewX509Verifier(cert, sigIntermediates, roots, trustedTime)
+func verifyX509Time(sig Signature, pae []byte, opts *verificationOptions) ([]PassedVerifier, error) {
+	cert, err := cryptoutil.TryParseCertificate(sig.Certificate)
 	if err != nil {
 		return nil, err
 	}
 
-	if err := verifier.Verify(bytes.NewReader(pae), sig); err != nil {
-		return nil, err
+	ints := make([]*x509.Certificate, 0)
+	if len(opts.intermediates) > 0 {
+		ints = append(ints, opts.intermediates...)
 	}
 
-	return verifier, nil
+	for _, int := range sig.Intermediates {
+		intCert, err := cryptoutil.TryParseCertificate(int)
+		if err != nil {
+			continue
+		}
+
+		ints = append(ints, intCert)
+	}
+
+	var trustedTimes []TimestampInfo
+	if len(opts.timestampAuthorities) == 0 {
+		trustedTimes = append(trustedTimes, TimestampInfo{Timestamp: time.Now()})
+	} else {
+		for _, timestampVerifier := range opts.timestampAuthorities {
+			for _, sigTimestamp := range sig.Timestamps {
+				tt, err := timestampVerifier.Verify(context.TODO(), bytes.NewReader(sigTimestamp.Data), bytes.NewReader(sig.Signature))
+				if err != nil {
+					continue
+				}
+				trustedTimes = append(trustedTimes, TimestampInfo{URL: timestampVerifier.Url(context.TODO()), Timestamp: tt})
+			}
+		}
+	}
+
+	var pvs []PassedVerifier
+	for _, tt := range trustedTimes {
+		v, err := cryptoutil.NewX509Verifier(cert, ints, opts.roots, tt.Timestamp)
+		if err != nil {
+			return nil, err
+		}
+
+		if err := v.Verify(bytes.NewReader(pae), sig.Signature); err != nil {
+			return nil, err
+		}
+
+		if tt.URL != "" {
+			tt = TimestampInfo{}
+		}
+
+		pvs = append(pvs,
+			PassedVerifier{
+				Verifier:           v,
+				TimestampAuthority: tt,
+			},
+		)
+	}
+
+	return pvs, nil
 }

@@ -15,6 +15,7 @@
 package dsse
 
 import (
+	"encoding/json"
 	"fmt"
 )
 
@@ -68,6 +69,11 @@ const TimestampRFC3161 SignatureTimestampType = "tsp"
 type SignatureTimestamp struct {
 	Type SignatureTimestampType `json:"type"`
 	Data []byte                 `json:"data"`
+}
+
+func (e *Envelope) Write(b []byte) (int, error) {
+	json.Unmarshal(b, e)
+	return len(b), nil
 }
 
 // preauthEncode wraps the data to be signed or verified and it's type in the DSSE protocol's

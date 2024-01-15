@@ -40,10 +40,13 @@ func VerifySignature(r io.Reader, verifiers ...cryptoutil.Verifier) (dsse.Envelo
 }
 
 type verifyOptions struct {
-	policyEnvelope   dsse.Envelope
-	policyVerifiers  []cryptoutil.Verifier
-	collectionSource source.Sourcer
-	subjectDigests   []string
+	policyEnvelope      dsse.Envelope
+	policyTimestampers  []timestamp.Timestamper
+	policyRoots         []*x509.Certificate
+	policyIntermediates []*x509.Certificate
+	policyVerifiers     []cryptoutil.Verifier
+	collectionSource    source.Sourcer
+	subjectDigests      []string
 }
 
 type VerifyOption func(*verifyOptions)
@@ -64,6 +67,24 @@ func VerifyWithCollectionSource(source source.Sourcer) VerifyOption {
 	}
 }
 
+func VerifyWithPolicyRoots(roots []*x509.Certificate) VerifyOption {
+	return func(vo *verifyOptions) {
+		vo.policyRoots = roots
+	}
+}
+
+func VerifyWithPolicyIntermediates(intermediates []*x509.Certificate) VerifyOption {
+	return func(vo *verifyOptions) {
+		vo.policyIntermediates = intermediates
+	}
+}
+
+func VerifyWithPolicyTimestampers(timestampers []timestamp.Timestamper) VerifyOption {
+	return func(vo *verifyOptions) {
+		vo.policyTimestampers = timestampers
+	}
+}
+
 // Verify verifies a set of attestations against a provided policy. The set of attestations that satisfy the policy will be returned
 // if verifiation is successful.
 func Verify(ctx context.Context, policyEnvelope dsse.Envelope, policyVerifiers []cryptoutil.Verifier, opts ...VerifyOption) (map[string][]source.VerifiedCollection, error) {
@@ -76,8 +97,8 @@ func Verify(ctx context.Context, policyEnvelope dsse.Envelope, policyVerifiers [
 		opt(&vo)
 	}
 
-	if _, err := vo.policyEnvelope.Verify(dsse.VerifyWithVerifiers(vo.policyVerifiers...)); err != nil {
-		return nil, fmt.Errorf("could not verify policy: %w", err)
+	if _, err := vo.policyEnvelope.Verify(dsseOpts(&vo)...); err != nil {
+		return nil, fmt.Errorf("failed to verify policy: %w", err)
 	}
 
 	pol := policy.Policy{}
@@ -85,51 +106,24 @@ func Verify(ctx context.Context, policyEnvelope dsse.Envelope, policyVerifiers [
 		return nil, fmt.Errorf("failed to unmarshal policy from envelope: %w", err)
 	}
 
-	pubKeysById, err := pol.PublicKeyVerifiers()
+	sourceOpts, err := pol.VerifyOpts()
 	if err != nil {
-		return nil, fmt.Errorf("failed to get pulic keys from policy: %w", err)
-	}
-
-	pubkeys := make([]cryptoutil.Verifier, 0)
-	for _, pubkey := range pubKeysById {
-		pubkeys = append(pubkeys, pubkey)
-	}
-
-	trustBundlesById, err := pol.TrustBundles()
-	if err != nil {
-		return nil, fmt.Errorf("failed to load policy trust bundles: %w", err)
-	}
-
-	roots := make([]*x509.Certificate, 0)
-	intermediates := make([]*x509.Certificate, 0)
-	for _, trustBundle := range trustBundlesById {
-		roots = append(roots, trustBundle.Root)
-		intermediates = append(intermediates, intermediates...)
-	}
-
-	timestampAuthoritiesById, err := pol.TimestampAuthorityTrustBundles()
-	if err != nil {
-		return nil, fmt.Errorf("failed to load policy timestamp authorities: %w", err)
-	}
-
-	timestampVerifiers := make([]dsse.TimestampVerifier, 0)
-	for _, timestampAuthority := range timestampAuthoritiesById {
-		certs := []*x509.Certificate{timestampAuthority.Root}
-		certs = append(certs, timestampAuthority.Intermediates...)
-		timestampVerifiers = append(timestampVerifiers, timestamp.NewVerifier(timestamp.VerifyWithCerts(certs)))
+		return nil, fmt.Errorf("failed to prepare verification options from the policy %w", err)
 	}
 
 	verifiedSource := source.NewVerifiedSource(
 		vo.collectionSource,
-		dsse.VerifyWithVerifiers(pubkeys...),
-		dsse.VerifyWithRoots(roots...),
-		dsse.VerifyWithIntermediates(intermediates...),
-		dsse.VerifyWithTimestampVerifiers(timestampVerifiers...),
+		sourceOpts...,
 	)
+
 	accepted, err := pol.Verify(ctx, policy.WithSubjectDigests(vo.subjectDigests), policy.WithVerifiedSource(verifiedSource))
 	if err != nil {
 		return nil, fmt.Errorf("failed to verify policy: %w", err)
 	}
 
 	return accepted, nil
+}
+
+func dsseOpts(vo *verifyOptions) []dsse.VerificationOption {
+	return dsse.VerifyOpts(vo.policyVerifiers, vo.policyRoots, vo.policyIntermediates, vo.policyTimestampers)
 }

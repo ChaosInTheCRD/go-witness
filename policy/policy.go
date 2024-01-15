@@ -18,12 +18,15 @@ import (
 	"bytes"
 	"context"
 	"crypto/x509"
+	"fmt"
 	"time"
 
 	"github.com/in-toto/go-witness/attestation"
 	"github.com/in-toto/go-witness/cryptoutil"
+	"github.com/in-toto/go-witness/dsse"
 	"github.com/in-toto/go-witness/log"
 	"github.com/in-toto/go-witness/source"
+	"github.com/in-toto/go-witness/timestamp"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
@@ -49,6 +52,45 @@ type Root struct {
 type PublicKey struct {
 	KeyID string `json:"keyid"`
 	Key   []byte `json:"key"`
+}
+
+// VerifyOpts returns the verify options for verifying subjects against the policy
+func (p Policy) VerifyOpts() ([]dsse.VerificationOption, error) {
+	pubKeysById, err := p.PublicKeyVerifiers()
+	if err != nil {
+		return nil, fmt.Errorf("failed to get public keys from policy: %w", err)
+	}
+
+	pubKeys := make([]cryptoutil.Verifier, 0)
+	for _, pubkey := range pubKeysById {
+		pubKeys = append(pubKeys, pubkey)
+	}
+
+	trustBundlesById, err := p.TrustBundles()
+	if err != nil {
+		return nil, fmt.Errorf("failed to load policy trust bundles: %w", err)
+	}
+
+	roots := make([]*x509.Certificate, 0)
+	intermediates := make([]*x509.Certificate, 0)
+	for _, trustBundle := range trustBundlesById {
+		roots = append(roots, trustBundle.Root)
+		intermediates = append(intermediates, intermediates...)
+	}
+
+	timestampAuthoritiesById, err := p.TimestampAuthorityTrustBundles()
+	if err != nil {
+		return nil, fmt.Errorf("failed to load policy timestamp authorities: %w", err)
+	}
+
+	timestampers := make([]timestamp.Timestamper, 0)
+	for _, timestampAuthority := range timestampAuthoritiesById {
+		certs := []*x509.Certificate{timestampAuthority.Root}
+		certs = append(certs, timestampAuthority.Intermediates...)
+		timestampers = append(timestampers, timestamp.NewTimestampAuthority(timestamp.VerifyWithCertChain(certs)))
+	}
+
+	return dsse.VerifyOpts(pubKeys, roots, intermediates, timestampers), nil
 }
 
 // PublicKeyVerifiers returns verifiers for each of the policy's embedded public keys grouped by the key's ID

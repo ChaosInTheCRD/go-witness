@@ -103,7 +103,7 @@ UKqK1drk/NAJBzewdXUh
 )
 
 func TestTSP(t *testing.T) {
-	ts := NewTimestamper(TimestampWithUrl(tsaUrl))
+	ts := NewTimestampAuthority(TimestampWithURL(tsaUrl))
 	payload := []byte("some data to timestamp")
 	resp, err := ts.Timestamp(context.Background(), bytes.NewReader(payload))
 	require.NoError(t, err)

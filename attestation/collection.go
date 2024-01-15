@@ -42,9 +42,6 @@ func NewCollection(name string, attestors []CompletedAttestor) Collection {
 		Attestations: make([]CollectionAttestation, 0),
 	}
 
-	//move start/stop time to collection
-	//todo: this is a bit of a hack, but it's the easiest way to get the start/stop time
-
 	for _, completed := range attestors {
 		collection.Attestations = append(collection.Attestations, NewCollectionAttestation(completed))
 	}

@@ -24,7 +24,7 @@ import (
 	"github.com/in-toto/go-witness/attestation/git"
 	"github.com/in-toto/go-witness/cryptoutil"
 	"github.com/in-toto/go-witness/dsse"
-	"github.com/in-toto/go-witness/intoto"
+	"github.com/in-toto/go-witness/timestamp"
 )
 
 type runOptions struct {
@@ -32,7 +32,8 @@ type runOptions struct {
 	signer          cryptoutil.Signer
 	attestors       []attestation.Attestor
 	attestationOpts []attestation.AttestationContextOption
-	timestampers    []dsse.Timestamper
+	// NOTE: timestampers might be better named as something else
+	timestampers []timestamp.Timestamper
 }
 
 type RunOption func(ro *runOptions)
@@ -49,7 +50,8 @@ func RunWithAttestationOpts(opts ...attestation.AttestationContextOption) RunOpt
 	}
 }
 
-func RunWithTimestampers(ts ...dsse.Timestamper) RunOption {
+// NOTE: Rename function appropriately
+func RunWithTimestampers(ts ...timestamp.Timestamper) RunOption {
 	return func(ro *runOptions) {
 		ro.timestampers = ts
 	}
@@ -64,7 +66,7 @@ func Run(stepName string, signer cryptoutil.Signer, opts ...RunOption) (RunResul
 	ro := runOptions{
 		stepName:  stepName,
 		signer:    signer,
-		attestors: []attestation.Attestor{environment.New(), git.New()},
+		attestors: loadDefaultAttestors(),
 	}
 
 	for _, opt := range opts {
@@ -86,12 +88,21 @@ func Run(stepName string, signer cryptoutil.Signer, opts ...RunOption) (RunResul
 	}
 
 	result.Collection = attestation.NewCollection(ro.stepName, runCtx.CompletedAttestors())
-	result.SignedEnvelope, err = signCollection(result.Collection, dsse.SignWithSigners(ro.signer), dsse.SignWithTimestampers(ro.timestampers...))
+	data, err := json.Marshal(&result.Collection)
+	if err != nil {
+		return result, err
+	}
+
+	err = Sign(bytes.NewReader(data), attestation.CollectionType, &result.SignedEnvelope, dsse.SignWithSigners(ro.signer), dsse.SignWithTimestampers(ro.timestampers...))
 	if err != nil {
 		return result, fmt.Errorf("failed to sign collection: %w", err)
 	}
 
 	return result, nil
+}
+
+func loadDefaultAttestors() []attestation.Attestor {
+	return []attestation.Attestor{environment.New(), git.New()}
 }
 
 func validateRunOpts(ro runOptions) error {
@@ -103,24 +114,9 @@ func validateRunOpts(ro runOptions) error {
 		return fmt.Errorf("signer is required")
 	}
 
+	if len(ro.attestors) == 0 {
+		return fmt.Errorf("at least one attestor is required")
+	}
+
 	return nil
-}
-
-func signCollection(collection attestation.Collection, opts ...dsse.SignOption) (dsse.Envelope, error) {
-	data, err := json.Marshal(&collection)
-	if err != nil {
-		return dsse.Envelope{}, err
-	}
-
-	stmt, err := intoto.NewStatement(attestation.CollectionType, data, collection.Subjects())
-	if err != nil {
-		return dsse.Envelope{}, err
-	}
-
-	stmtJson, err := json.Marshal(&stmt)
-	if err != nil {
-		return dsse.Envelope{}, err
-	}
-
-	return dsse.Sign(intoto.PayloadType, bytes.NewReader(stmtJson), opts...)
 }

@@ -29,34 +29,51 @@ import (
 	"github.com/in-toto/go-witness/cryptoutil"
 )
 
-type TSPTimestamper struct {
+// Timestamper provides the way to
+type Timestamper interface {
+	Timestamp(context.Context, io.Reader) ([]byte, error)
+	Verify(context.Context, io.Reader, io.Reader) (time.Time, error)
+	Url(context.Context) string
+}
+
+type TimestampAuthority struct {
 	url                string
 	hash               crypto.Hash
 	requestCertificate bool
+	certChain          *x509.CertPool
 }
 
-type TSPTimestamperOption func(*TSPTimestamper)
+type TimestampAuthorityOption func(*TimestampAuthority)
 
-func TimestampWithUrl(url string) TSPTimestamperOption {
-	return func(t *TSPTimestamper) {
+func TimestampWithURL(url string) TimestampAuthorityOption {
+	return func(t *TimestampAuthority) {
 		t.url = url
 	}
 }
 
-func TimestampWithHash(h crypto.Hash) TSPTimestamperOption {
-	return func(t *TSPTimestamper) {
+func TimestampWithHash(h crypto.Hash) TimestampAuthorityOption {
+	return func(t *TimestampAuthority) {
 		t.hash = h
 	}
 }
 
-func TimestampWithRequestCertificate(requestCertificate bool) TSPTimestamperOption {
-	return func(t *TSPTimestamper) {
+func TimestampWithRequestCertificate(requestCertificate bool) TimestampAuthorityOption {
+	return func(t *TimestampAuthority) {
 		t.requestCertificate = requestCertificate
 	}
 }
 
-func NewTimestamper(opts ...TSPTimestamperOption) TSPTimestamper {
-	t := TSPTimestamper{
+func VerifyWithCertChain(certs []*x509.Certificate) TimestampAuthorityOption {
+	return func(t *TimestampAuthority) {
+		t.certChain = x509.NewCertPool()
+		for _, cert := range certs {
+			t.certChain.AddCert(cert)
+		}
+	}
+}
+
+func NewTimestampAuthority(opts ...TimestampAuthorityOption) TimestampAuthority {
+	t := TimestampAuthority{
 		hash:               crypto.SHA256,
 		requestCertificate: true,
 	}
@@ -68,7 +85,7 @@ func NewTimestamper(opts ...TSPTimestamperOption) TSPTimestamper {
 	return t
 }
 
-func (t TSPTimestamper) Timestamp(ctx context.Context, r io.Reader) ([]byte, error) {
+func (t TimestampAuthority) Timestamp(ctx context.Context, r io.Reader) ([]byte, error) {
 	tsq, err := timestamp.CreateRequest(r, &timestamp.RequestOptions{
 		Hash:         t.hash,
 		Certificates: t.requestCertificate,
@@ -109,41 +126,7 @@ func (t TSPTimestamper) Timestamp(ctx context.Context, r io.Reader) ([]byte, err
 	return timestamp.RawToken, nil
 }
 
-type TSPVerifier struct {
-	certChain *x509.CertPool
-	hash      crypto.Hash
-}
-
-type TSPVerifierOption func(*TSPVerifier)
-
-func VerifyWithCerts(certs []*x509.Certificate) TSPVerifierOption {
-	return func(t *TSPVerifier) {
-		t.certChain = x509.NewCertPool()
-		for _, cert := range certs {
-			t.certChain.AddCert(cert)
-		}
-	}
-}
-
-func VerifyWithHash(h crypto.Hash) TSPVerifierOption {
-	return func(t *TSPVerifier) {
-		t.hash = h
-	}
-}
-
-func NewVerifier(opts ...TSPVerifierOption) TSPVerifier {
-	v := TSPVerifier{
-		hash: crypto.SHA256,
-	}
-
-	for _, opt := range opts {
-		opt(&v)
-	}
-
-	return v
-}
-
-func (v TSPVerifier) Verify(ctx context.Context, tsrData, signedData io.Reader) (time.Time, error) {
+func (t TimestampAuthority) Verify(ctx context.Context, tsrData, signedData io.Reader) (time.Time, error) {
 	tsrBytes, err := io.ReadAll(tsrData)
 	if err != nil {
 		return time.Time{}, err
@@ -154,7 +137,7 @@ func (v TSPVerifier) Verify(ctx context.Context, tsrData, signedData io.Reader) 
 		return time.Time{}, err
 	}
 
-	hashedData, err := cryptoutil.Digest(signedData, v.hash)
+	hashedData, err := cryptoutil.Digest(signedData, t.hash)
 	if err != nil {
 		return time.Time{}, err
 	}
@@ -168,9 +151,13 @@ func (v TSPVerifier) Verify(ctx context.Context, tsrData, signedData io.Reader) 
 		return time.Time{}, err
 	}
 
-	if err := p7.VerifyWithChain(v.certChain); err != nil {
+	if err := p7.VerifyWithChain(t.certChain); err != nil {
 		return time.Time{}, err
 	}
 
 	return ts.Time, nil
+}
+
+func (t TimestampAuthority) Url(ctx context.Context) string {
+	return t.url
 }

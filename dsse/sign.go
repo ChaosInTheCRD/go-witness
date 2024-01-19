@@ -22,15 +22,12 @@ import (
 	"io"
 
 	"github.com/in-toto/go-witness/cryptoutil"
+	"github.com/in-toto/go-witness/timestamp"
 )
-
-type Timestamper interface {
-	Timestamp(context.Context, io.Reader) ([]byte, error)
-}
 
 type signOptions struct {
 	signers      []cryptoutil.Signer
-	timestampers []Timestamper
+	timestampers []timestamp.Timestamper
 }
 
 type SignOption func(*signOptions)
@@ -41,7 +38,7 @@ func SignWithSigners(signers ...cryptoutil.Signer) SignOption {
 	}
 }
 
-func SignWithTimestampers(timestampers ...Timestamper) SignOption {
+func SignWithTimestampers(timestampers ...timestamp.Timestamper) SignOption {
 	return func(so *signOptions) {
 		so.timestampers = timestampers
 	}
@@ -56,6 +53,18 @@ func Sign(bodyType string, body io.Reader, opts ...SignOption) (Envelope, error)
 
 	if len(so.signers) == 0 {
 		return env, fmt.Errorf("must have at least one signer, have %v", len(so.signers))
+	}
+
+	if len(so.timestampers) > 0 {
+		for i, signer := range so.signers {
+			if _, ok := signer.(*cryptoutil.X509Signer); ok {
+				break
+			}
+
+			if i == len(so.signers)-1 {
+				return env, fmt.Errorf("signing with timestamp authority requires an X.509 signer")
+			}
+		}
 	}
 
 	bodyBytes, err := io.ReadAll(body)

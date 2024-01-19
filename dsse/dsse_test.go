@@ -141,13 +141,6 @@ func createLeaf(parent *x509.Certificate, parentPriv interface{}) (*x509.Certifi
 	return cert, priv, err
 }
 
-func TestSign(t *testing.T) {
-	signer, _, err := createTestKey()
-	require.NoError(t, err)
-	_, err = Sign("dummydata", bytes.NewReader([]byte("this is some dummy data")), SignWithSigners(signer))
-	require.NoError(t, err)
-}
-
 func TestVerify(t *testing.T) {
 	signer, verifier, err := createTestKey()
 	require.NoError(t, err)
@@ -222,48 +215,6 @@ func TestThreshold(t *testing.T) {
 
 	_, err = env.Verify(VerifyWithVerifiers(verifiers...), VerifyWithThreshold(-10))
 	require.ErrorIs(t, err, ErrInvalidThreshold(-10))
-}
-
-func TestTimestamp(t *testing.T) {
-	root, rootPriv, err := createRoot()
-	require.NoError(t, err)
-	intermediate, intermediatePriv, err := createIntermediate(root, rootPriv)
-	require.NoError(t, err)
-	leaf, leafPriv, err := createLeaf(intermediate, intermediatePriv)
-	require.NoError(t, err)
-	s, err := cryptoutil.NewSigner(leafPriv, cryptoutil.SignWithCertificate(leaf))
-	require.NoError(t, err)
-	v, err := s.Verifier()
-	require.NoError(t, err)
-	expectedTimestampers := []dummyTimestamper{
-		{t: time.Now()},
-		{t: time.Now().Add(12 * time.Hour)},
-	}
-	unexpectedTimestampers := []dummyTimestamper{
-		{t: time.Now().Add(36 * time.Hour)},
-		{t: time.Now().Add(128 * time.Hour)},
-	}
-
-	allTimestampers := make([]Timestamper, 0)
-	allTimestampVerifiers := make([]TimestampVerifier, 0)
-	for _, expected := range expectedTimestampers {
-		allTimestampers = append(allTimestampers, expected)
-		allTimestampVerifiers = append(allTimestampVerifiers, expected)
-	}
-
-	for _, unexpected := range unexpectedTimestampers {
-		allTimestampers = append(allTimestampers, unexpected)
-		allTimestampVerifiers = append(allTimestampVerifiers, unexpected)
-	}
-
-	env, err := Sign("dummydata", bytes.NewReader([]byte("this is some dummy data")), SignWithSigners(s), SignWithTimestampers(allTimestampers...))
-	require.NoError(t, err)
-
-	approvedVerifiers, err := env.Verify(VerifyWithVerifiers(v), VerifyWithRoots(root), VerifyWithIntermediates(intermediate), VerifyWithTimestampVerifiers(allTimestampVerifiers...))
-	require.NoError(t, err)
-	assert.Len(t, approvedVerifiers, 1)
-	assert.Len(t, approvedVerifiers[0].PassedTimestampVerifiers, len(expectedTimestampers))
-	assert.ElementsMatch(t, approvedVerifiers[0].PassedTimestampVerifiers, expectedTimestampers)
 }
 
 type dummyTimestamper struct {

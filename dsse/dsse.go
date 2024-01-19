@@ -18,6 +18,12 @@ import (
 	"fmt"
 )
 
+type ErrNoRootsOrIntermediates struct{}
+
+func (e ErrNoRootsOrIntermediates) Error() string {
+	return "no roots or intermediates provided"
+}
+
 type ErrNoSignatures struct{}
 
 func (e ErrNoSignatures) Error() string {

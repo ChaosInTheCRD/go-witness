@@ -29,6 +29,14 @@ import (
 	"github.com/in-toto/go-witness/cryptoutil"
 )
 
+type Timestamper interface {
+	Timestamp(context.Context, io.Reader) ([]byte, error)
+}
+
+type TimestampVerifier interface {
+	Verify(context.Context, io.Reader, io.Reader) (time.Time, error)
+}
+
 type TSPTimestamper struct {
 	url                string
 	hash               crypto.Hash

@@ -20,8 +20,6 @@ import (
 	"fmt"
 
 	"github.com/in-toto/go-witness/attestation"
-	"github.com/in-toto/go-witness/attestation/environment"
-	"github.com/in-toto/go-witness/attestation/git"
 	"github.com/in-toto/go-witness/cryptoutil"
 	"github.com/in-toto/go-witness/dsse"
 	"github.com/in-toto/go-witness/intoto"
@@ -65,7 +63,7 @@ func Run(stepName string, signer cryptoutil.Signer, opts ...RunOption) (RunResul
 	ro := runOptions{
 		stepName:  stepName,
 		signer:    signer,
-		attestors: []attestation.Attestor{environment.New(), git.New()},
+		attestors: []attestation.Attestor{},
 	}
 
 	for _, opt := range opts {

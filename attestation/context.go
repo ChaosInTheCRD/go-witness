@@ -39,6 +39,24 @@ func (r RunType) String() string {
 	return string(r)
 }
 
+func ParseRunType(r string) RunType {
+	switch r {
+	case "prematerial":
+		return PreMaterialRunType
+	case "material":
+		return MaterialRunType
+	case "execute":
+		return ExecuteRunType
+	case "product":
+		return ProductRunType
+	case "postproduct":
+		return PostProductRunType
+	default:
+		// NOTE: This is wrong and should be tidied up
+		return PreMaterialRunType
+	}
+}
+
 type ErrInvalidOption struct {
 	Option string
 	Reason string

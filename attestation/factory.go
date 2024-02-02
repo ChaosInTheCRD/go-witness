@@ -15,14 +15,10 @@
 package attestation
 
 import (
-	"context"
-	"encoding/json"
 	"fmt"
-	"os/exec"
 
 	"github.com/in-toto/go-witness/cryptoutil"
 	"github.com/in-toto/go-witness/registry"
-	"github.com/qri-io/jsonschema"
 )
 
 var (
@@ -36,134 +32,6 @@ type Attestor interface {
 	Type() string
 	RunType() RunType
 	Attest(ctx *AttestationContext) error
-}
-
-type CustomAttestor struct {
-	ValidatedType string
-	Definition    CustomAttestorDefinition
-	Output        []byte
-}
-
-func (c *CustomAttestor) MarshalJSON() ([]byte, error) {
-	var out OutputAttestation
-	err := json.Unmarshal(c.Output, &out)
-	if err != nil {
-		return nil, err
-	}
-	return json.Marshal(out.Attestation)
-}
-
-type CustomAttestorDefinition struct {
-	Version  string   `json:"version" yaml:"version"`
-	Metadata Metadata `json:"metadata" yaml:"metadata"`
-	Spec     Spec     `json:"spec" yaml:"spec"`
-}
-
-type Metadata struct {
-	Name string `json:"name" yaml:"name"`
-	Type string `json:"type" yaml:"type"`
-}
-
-type Spec struct {
-	RunType  string    `json:"runType" yaml:"runType"`
-	Executor Executor  `json:"executor" yaml:"executor"`
-	Versions []Version `json:"versions" yaml:"versions"`
-}
-
-type Executor struct {
-	Attest Execute `json:"attest" yaml:"attest"`
-	Verify Execute `json:"verify" yaml:"verify"`
-}
-
-type Execute struct {
-	Type      string   `json:"type" yaml:"type"`
-	Arguments []string `json:"arguments" yaml:"arguments"`
-}
-
-type Version struct {
-	Name   string            `json:"name" yaml:"name"`
-	Schema jsonschema.Schema `json:"schema" yaml:"schema"`
-}
-
-type OutputAttestation struct {
-	Type        string                 `json:"type"`
-	Attestation map[string]interface{} `json:"attestation"`
-}
-
-func (c *CustomAttestor) Name() string {
-	return c.Definition.Metadata.Name
-}
-
-func (c *CustomAttestor) RunType() RunType {
-	return ParseRunType(c.Definition.Spec.RunType)
-}
-
-func (c *CustomAttestor) Type() string {
-	return c.ValidatedType
-}
-
-func (c *CustomAttestor) Attest(ctx *AttestationContext) error {
-	attest := c.Definition.Spec.Executor.Attest
-	var output []byte
-	var err error
-	if attest.Type == "command" {
-		var command string
-		var args []string
-		if len(attest.Arguments) == 0 {
-			return fmt.Errorf("no command specified")
-		} else if len(attest.Arguments) == 1 {
-			command = attest.Arguments[0]
-		} else {
-			command = attest.Arguments[0]
-			args = attest.Arguments[1:]
-		}
-
-		cmd := exec.Command(command, args...)
-		output, err = cmd.CombinedOutput()
-		if err != nil {
-			return fmt.Errorf("Error running custom attestor: %v", err)
-		}
-	} else {
-		return fmt.Errorf("Executor type not supported")
-	}
-
-	// verify the output against the json Schema
-	var schema *jsonschema.Schema
-	var att OutputAttestation
-	err = json.Unmarshal(output, &att)
-	if err != nil {
-		return fmt.Errorf("Error unmarshalling custom attestor output: %v", err)
-	}
-	for _, v := range c.Definition.Spec.Versions {
-		t := fmt.Sprintf("%s/%s/%s", c.Definition.Metadata.Type, c.Definition.Metadata.Name, v.Name)
-		if att.Type == t {
-			c.ValidatedType = t
-			schema = &v.Schema
-			break
-		}
-	}
-
-	if c.ValidatedType == "" {
-		return fmt.Errorf("no matching version found for attestation outputted by custom attestor")
-	}
-
-	out, err := json.Marshal(att.Attestation)
-	if err != nil {
-		return fmt.Errorf("Error marshalling custom attestor output: %v", err)
-	}
-
-	errs, err := schema.ValidateBytes(context.Background(), out)
-	if err != nil {
-		return fmt.Errorf("Error validating custom attestor output: %v", err)
-	}
-
-	if len(errs) > 0 {
-		return fmt.Errorf("outputted JSON does not match schema: %v", errs)
-	}
-
-	c.Output = output
-
-	return nil
 }
 
 // Subjecter allows attestors to expose bits of information that will be added to
@@ -214,12 +82,13 @@ func RegisterAttestation(name, predicateType string, run RunType, factoryFunc re
 	attestationsByRun[run] = registrationEntry
 }
 
-func RegisterCustomAttestation(definition CustomAttestorDefinition) {
-	registrationEntry := attestorRegistry.Register(definition.Metadata.Name, func() Attestor {
-		return &CustomAttestor{Definition: definition}
+// NOTE: We can't currently cant import the custom attestor type as it causes an import cycle
+func RegisterCustomAttestation(att Attestor) {
+	registrationEntry := attestorRegistry.Register(att.Name(), func() Attestor {
+		return att
 	})
-	attestationsByType[definition.Metadata.Type] = registrationEntry
-	attestationsByRun[ParseRunType(definition.Spec.RunType)] = registrationEntry
+	attestationsByType[att.Type()] = registrationEntry
+	attestationsByRun[ParseRunType(att.RunType().String())] = registrationEntry
 }
 
 func FactoryByType(uri string) (registry.FactoryFunc[Attestor], bool) {

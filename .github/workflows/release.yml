@@ -55,3 +55,13 @@ jobs:
       command: go test -v -coverprofile=profile.cov -covermode=atomic ./...
       artifact-upload-name: profile.cov
       artifact-upload-path: profile.cov
+
+  release:
+    needs: [fmt, sast, unit-test]
+    if: github.event_name == 'push' && contains(github.ref, 'refs/tags/')
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11 # v4.1.1
+      - name: Release
+        uses: softprops/action-gh-release@de2c0eb89ae2a093876385947365aca7b0e5f844 # v1

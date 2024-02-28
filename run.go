@@ -26,6 +26,7 @@ import (
 	"github.com/in-toto/go-witness/cryptoutil"
 	"github.com/in-toto/go-witness/dsse"
 	"github.com/in-toto/go-witness/intoto"
+	"github.com/in-toto/go-witness/log"
 	"github.com/in-toto/go-witness/timestamp"
 )
 
@@ -62,6 +63,11 @@ type RunResult struct {
 	SignedEnvelope dsse.Envelope
 }
 
+type attestorError struct {
+	Attestor string
+	Error    error
+}
+
 func Run(stepName string, signer cryptoutil.Signer, opts ...RunOption) (RunResult, error) {
 	ro := runOptions{
 		stepName:  stepName,
@@ -87,15 +93,19 @@ func Run(stepName string, signer cryptoutil.Signer, opts ...RunOption) (RunResul
 		return result, fmt.Errorf("failed to run attestors: %w", err)
 	}
 
-	errs := make([]error, 0)
+	aerrs := make([]attestorError, 0)
 	for _, r := range runCtx.CompletedAttestors() {
 		if r.Error != nil {
-			errs = append(errs, r.Error)
+			log.Info("Attestor failed: ", r.Attestor.Name(), " Error: ", r.Error)
+			aerrs = append(aerrs, attestorError{Attestor: r.Attestor.Name(), Error: r.Error})
 		}
 	}
 
-	if len(errs) > 0 {
-		errs := append([]error{errors.New("attestors failed with error messages")}, errs...)
+	if len(aerrs) > 0 {
+		errs := []error{errors.New("attestors failed with error messages")}
+		for _, e := range aerrs {
+			errs = append(errs, fmt.Errorf("attestor: %s, error: %s", e.Attestor, e.Error))
+		}
 		return result, errors.Join(errs...)
 	}
 

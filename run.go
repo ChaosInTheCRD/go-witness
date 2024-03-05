@@ -69,6 +69,7 @@ type attestorError struct {
 }
 
 func Run(stepName string, signer cryptoutil.Signer, opts ...RunOption) (RunResult, error) {
+	log.Info("Running witness")
 	ro := runOptions{
 		stepName:  stepName,
 		signer:    signer,
@@ -80,15 +81,14 @@ func Run(stepName string, signer cryptoutil.Signer, opts ...RunOption) (RunResul
 	}
 
 	result := RunResult{}
-	if err := validateRunOpts(ro); err != nil {
-		return result, err
-	}
 
+	log.Info("creating attestation context")
 	runCtx, err := attestation.NewContext(ro.attestors, ro.attestationOpts...)
 	if err != nil {
 		return result, fmt.Errorf("failed to create attestation context: %w", err)
 	}
 
+	log.Info("Running attestors")
 	if err = runCtx.RunAttestors(); err != nil {
 		return result, fmt.Errorf("failed to run attestors: %w", err)
 	}
@@ -110,9 +110,13 @@ func Run(stepName string, signer cryptoutil.Signer, opts ...RunOption) (RunResul
 	}
 
 	result.Collection = attestation.NewCollection(ro.stepName, runCtx.CompletedAttestors())
-	result.SignedEnvelope, err = signCollection(result.Collection, dsse.SignWithSigners(ro.signer), dsse.SignWithTimestampers(ro.timestampers...))
-	if err != nil {
-		return result, fmt.Errorf("failed to sign collection: %w", err)
+	if ro.signer == nil {
+		log.Warn("No signer provided, skipping signing")
+	} else {
+		result.SignedEnvelope, err = signCollection(result.Collection, dsse.SignWithSigners(ro.signer), dsse.SignWithTimestampers(ro.timestampers...))
+		if err != nil {
+			return result, fmt.Errorf("failed to sign collection: %w", err)
+		}
 	}
 
 	return result, nil

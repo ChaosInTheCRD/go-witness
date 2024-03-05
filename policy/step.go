@@ -19,6 +19,7 @@ import (
 	"strings"
 
 	"github.com/in-toto/go-witness/attestation"
+	attestationn "github.com/in-toto/go-witness/attestation"
 	"github.com/in-toto/go-witness/cryptoutil"
 	"github.com/in-toto/go-witness/source"
 )
@@ -118,7 +119,11 @@ func (s Step) validateAttestations(verifiedCollections []source.VerifiedCollecti
 	for _, collection := range verifiedCollections {
 		found := make(map[string]attestation.Attestor)
 		for _, attestation := range collection.Collection.Attestations {
-			found[attestation.Type] = attestation.Attestation
+			a, ok := attestation.Attestation.(attestationn.Attestor)
+			if !ok {
+				return StepResult{}
+			}
+			found[attestation.Type] = a
 		}
 
 		passed := true

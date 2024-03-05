@@ -30,10 +30,10 @@ type Collection struct {
 }
 
 type CollectionAttestation struct {
-	Type        string    `json:"type"`
-	Attestation Attestor  `json:"attestation"`
-	StartTime   time.Time `json:"starttime"`
-	EndTime     time.Time `json:"endtime"`
+	Type        string      `json:"type"`
+	Attestation interface{} `json:"attestation"`
+	StartTime   time.Time   `json:"starttime"`
+	EndTime     time.Time   `json:"endtime"`
 }
 
 func NewCollection(name string, attestors []CompletedAttestor) Collection {
@@ -42,8 +42,8 @@ func NewCollection(name string, attestors []CompletedAttestor) Collection {
 		Attestations: make([]CollectionAttestation, 0),
 	}
 
-	//move start/stop time to collection
-	//todo: this is a bit of a hack, but it's the easiest way to get the start/stop time
+	// move start/stop time to collection
+	// todo: this is a bit of a hack, but it's the easiest way to get the start/stop time
 
 	for _, completed := range attestors {
 		collection.Attestations = append(collection.Attestations, NewCollectionAttestation(completed))

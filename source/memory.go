@@ -21,6 +21,7 @@ import (
 	"io"
 	"os"
 
+	"github.com/in-toto/go-witness/attestation"
 	"github.com/in-toto/go-witness/dsse"
 )
 
@@ -96,7 +97,11 @@ func (s *MemorySource) LoadEnvelope(reference string, env dsse.Envelope) error {
 	s.subjectDigestsByReference[reference] = subDigestIndex
 	attestationIndex := make(map[string]struct{})
 	for _, att := range collEnv.Collection.Attestations {
-		attestationIndex[att.Attestation.Type()] = struct{}{}
+		a, ok := att.Attestation.(attestation.Attestor)
+		if !ok {
+			return fmt.Errorf("attestation is not an attestation: ", err.Error())
+		}
+		attestationIndex[a.Type()] = struct{}{}
 	}
 
 	s.attestationsByReference[reference] = attestationIndex

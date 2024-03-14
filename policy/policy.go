@@ -168,6 +168,7 @@ func checkVerifyOpts(vo *verifyOptions) error {
 		}
 	}
 
+	// NOTE: ATTESTAGON: Adding this back, should be fine
 	if len(vo.subjectDigests) == 0 {
 		return ErrInvalidOption{
 			Option: "subject digests",
@@ -224,6 +225,17 @@ func (p Policy) Verify(ctx context.Context, opts ...VerifyOption) (map[string][]
 
 			approvedCollections := step.checkFunctionaries(statements, trustBundles)
 			stepResults := step.validateAttestations(approvedCollections)
+			if len(stepResults.Passed) == 0 && len(stepResults.Rejected) != 0 {
+				var reasons []string
+				for _, rejected := range stepResults.Rejected {
+					if err, ok := rejected.Reason.(ErrPolicyDenied); ok {
+						reasons = append(reasons, err.Reasons...)
+					} else {
+						reasons = append(reasons, rejected.Reason.Error())
+					}
+				}
+				return nil, ErrPolicyDenied{Reasons: reasons}
+			}
 			passedByStep[stepName] = append(passedByStep[stepName], stepResults.Passed...)
 			for _, coll := range stepResults.Passed {
 				for _, digestSet := range coll.Collection.BackRefs() {

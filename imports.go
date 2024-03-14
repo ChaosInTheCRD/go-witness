@@ -17,6 +17,7 @@ package witness
 // all of the following imports are here so that each of the package's init functions run appropriately
 import (
 	// attestors
+	_ "github.com/in-toto/go-witness/attestation/attestagon"
 	_ "github.com/in-toto/go-witness/attestation/aws-iid"
 	_ "github.com/in-toto/go-witness/attestation/commandrun"
 	_ "github.com/in-toto/go-witness/attestation/environment"

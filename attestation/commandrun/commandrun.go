@@ -148,10 +148,6 @@ func (r *CommandRun) runCmd(ctx *attestation.AttestationContext) error {
 	stderrBuffer := bytes.Buffer{}
 	stdoutWriters := []io.Writer{&stdoutBuffer}
 	stderrWriters := []io.Writer{&stderrBuffer}
-	if ctx.Writers() != nil {
-		stdoutWriters = append(stdoutWriters, ctx.Writers()...)
-		stderrWriters = append(stdoutWriters, ctx.Writers()...)
-	}
 
 	if !r.silent {
 		stdoutWriters = append(stdoutWriters, os.Stdout)

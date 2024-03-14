@@ -21,6 +21,7 @@ import (
 	"fmt"
 
 	"github.com/in-toto/go-witness/attestation"
+	"github.com/in-toto/go-witness/log"
 	"github.com/open-policy-agent/opa/ast"
 	"github.com/open-policy-agent/opa/rego"
 )
@@ -89,6 +90,10 @@ func EvaluateRegoPolicy(attestor attestation.Attestor, policies []RegoPolicy) er
 	}
 
 	if len(allDenyReasons) > 0 {
+		for _, reason := range allDenyReasons {
+			log.Warnf("Policy denied: %s", reason)
+		}
+
 		return ErrPolicyDenied{Reasons: allDenyReasons}
 	}
 

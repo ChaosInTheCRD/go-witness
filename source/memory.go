@@ -96,10 +96,11 @@ func (s *MemorySource) LoadEnvelope(reference string, env dsse.Envelope) error {
 
 	s.subjectDigestsByReference[reference] = subDigestIndex
 	attestationIndex := make(map[string]struct{})
+
 	for _, att := range collEnv.Collection.Attestations {
 		a, ok := att.Attestation.(attestation.Attestor)
 		if !ok {
-			return fmt.Errorf("attestation is not an attestation: ", err.Error())
+			return fmt.Errorf("attestation %s is not an attestation", att.Type)
 		}
 		attestationIndex[a.Type()] = struct{}{}
 	}

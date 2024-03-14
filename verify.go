@@ -172,7 +172,9 @@ func Verify(ctx context.Context, policyEnvelope dsse.Envelope, policyVerifiers [
 		dsse.VerifyWithTimestampVerifiers(timestampVerifiers...),
 	)
 	accepted, err := pol.Verify(ctx, policy.WithSubjectDigests(vo.subjectDigests), policy.WithVerifiedSource(verifiedSource))
-	if err != nil {
+	if errr, ok := err.(policy.ErrPolicyDenied); ok {
+		return nil, errr
+	} else if err != nil {
 		return nil, fmt.Errorf("failed to verify policy: %w", err)
 	}
 

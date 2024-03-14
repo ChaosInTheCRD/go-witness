@@ -18,7 +18,6 @@ import (
 	"context"
 	"crypto"
 	"fmt"
-	"io"
 	"os"
 	"time"
 
@@ -55,12 +54,6 @@ func (e ErrAttestor) Error() string {
 }
 
 type AttestationContextOption func(ctx *AttestationContext)
-
-func WithWriters(w []io.Writer) AttestationContextOption {
-	return func(ctx *AttestationContext) {
-		ctx.writers = w
-	}
-}
 
 func WithContext(ctx context.Context) AttestationContextOption {
 	return func(actx *AttestationContext) {
@@ -99,7 +92,6 @@ type AttestationContext struct {
 	completedAttestors []CompletedAttestor
 	products           map[string]Product
 	materials          map[string]cryptoutil.DigestSet
-	writers            []io.Writer
 }
 
 type Product struct {
@@ -189,10 +181,6 @@ func (ctx *AttestationContext) CompletedAttestors() []CompletedAttestor {
 
 func (ctx *AttestationContext) WorkingDir() string {
 	return ctx.workingDir
-}
-
-func (ctx *AttestationContext) Writers() []io.Writer {
-	return ctx.writers
 }
 
 func (ctx *AttestationContext) Hashes() []cryptoutil.DigestValue {

@@ -30,10 +30,10 @@ type Collection struct {
 }
 
 type CollectionAttestation struct {
-	Type        string      `json:"type"`
-	Attestation interface{} `json:"attestation"`
-	StartTime   time.Time   `json:"starttime"`
-	EndTime     time.Time   `json:"endtime"`
+	Type        string    `json:"type"`
+	Attestation Attestor  `json:"attestation"`
+	StartTime   time.Time `json:"starttime"`
+	EndTime     time.Time `json:"endtime"`
 }
 
 func NewCollection(name string, attestors []CompletedAttestor) Collection {
@@ -83,6 +83,7 @@ func (c *CollectionAttestation) UnmarshalJSON(data []byte) error {
 
 	c.Type = proposed.Type
 	c.Attestation = newAttest
+
 	return nil
 }
 

@@ -200,7 +200,7 @@ func (ksp *KMSSignerProvider) Signer(ctx context.Context) (cryptoutil.Signer, er
 	return nil, &ProviderNotFoundError{ref: ksp.Reference}
 }
 
-// NOTE: This is a temprorary implementation until we have a SignerVerifier interface
+// NOTE: This is a temporary implementation until we have a SignerVerifier interface
 func (ksp *KMSSignerProvider) Verifier(ctx context.Context) (cryptoutil.Verifier, error) {
 	for ref, pi := range providersMap {
 		if strings.HasPrefix(ksp.Reference, ref) {
@@ -209,7 +209,7 @@ func (ksp *KMSSignerProvider) Verifier(ctx context.Context) (cryptoutil.Verifier
 				return nil, err
 			}
 
-			// we need to conver this into a cryptoutil.Verifier
+			// we need to convert this into a cryptoutil.Verifier
 			return p.Verifier()
 		}
 	}

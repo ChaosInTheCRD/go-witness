@@ -26,6 +26,7 @@ import (
 	"github.com/in-toto/go-witness/cryptoutil"
 	"github.com/in-toto/go-witness/dsse"
 	"github.com/in-toto/go-witness/intoto"
+	"github.com/in-toto/go-witness/log"
 	"github.com/in-toto/go-witness/timestamp"
 )
 
@@ -62,7 +63,13 @@ type RunResult struct {
 	SignedEnvelope dsse.Envelope
 }
 
+type attestorError struct {
+	Attestor string
+	Error    error
+}
+
 func Run(stepName string, signer cryptoutil.Signer, opts ...RunOption) (RunResult, error) {
+	log.Info("Running witness")
 	ro := runOptions{
 		stepName:  stepName,
 		signer:    signer,
@@ -74,35 +81,42 @@ func Run(stepName string, signer cryptoutil.Signer, opts ...RunOption) (RunResul
 	}
 
 	result := RunResult{}
-	if err := validateRunOpts(ro); err != nil {
-		return result, err
-	}
 
+	log.Info("creating attestation context")
 	runCtx, err := attestation.NewContext(ro.attestors, ro.attestationOpts...)
 	if err != nil {
 		return result, fmt.Errorf("failed to create attestation context: %w", err)
 	}
 
+	log.Info("Running attestors")
 	if err = runCtx.RunAttestors(); err != nil {
 		return result, fmt.Errorf("failed to run attestors: %w", err)
 	}
 
-	errs := make([]error, 0)
+	aerrs := make([]attestorError, 0)
 	for _, r := range runCtx.CompletedAttestors() {
 		if r.Error != nil {
-			errs = append(errs, r.Error)
+			log.Info("Attestor failed: ", r.Attestor.Name(), " Error: ", r.Error)
+			aerrs = append(aerrs, attestorError{Attestor: r.Attestor.Name(), Error: r.Error})
 		}
 	}
 
-	if len(errs) > 0 {
-		errs := append([]error{errors.New("attestors failed with error messages")}, errs...)
+	if len(aerrs) > 0 {
+		errs := []error{errors.New("attestors failed with error messages")}
+		for _, e := range aerrs {
+			errs = append(errs, fmt.Errorf("attestor: %s, error: %s", e.Attestor, e.Error))
+		}
 		return result, errors.Join(errs...)
 	}
 
 	result.Collection = attestation.NewCollection(ro.stepName, runCtx.CompletedAttestors())
-	result.SignedEnvelope, err = signCollection(result.Collection, dsse.SignWithSigners(ro.signer), dsse.SignWithTimestampers(ro.timestampers...))
-	if err != nil {
-		return result, fmt.Errorf("failed to sign collection: %w", err)
+	if ro.signer == nil {
+		log.Warn("No signer provided, skipping signing")
+	} else {
+		result.SignedEnvelope, err = signCollection(result.Collection, dsse.SignWithSigners(ro.signer), dsse.SignWithTimestampers(ro.timestampers...))
+		if err != nil {
+			return result, fmt.Errorf("failed to sign collection: %w", err)
+		}
 	}
 
 	return result, nil

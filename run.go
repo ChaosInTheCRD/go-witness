@@ -113,7 +113,7 @@ func Run(stepName string, signer cryptoutil.Signer, opts ...RunOption) (RunResul
 	if ro.signer == nil {
 		log.Warn("No signer provided, skipping signing")
 	} else {
-		result.SignedEnvelope, err = signCollection(result.Collection, dsse.SignWithSigners(ro.signer), dsse.SignWithTimestampers(ro.timestampers...))
+		result.SignedEnvelope, err = SignCollection(result.Collection, dsse.SignWithSigners(ro.signer), dsse.SignWithTimestampers(ro.timestampers...))
 		if err != nil {
 			return result, fmt.Errorf("failed to sign collection: %w", err)
 		}
@@ -134,7 +134,7 @@ func validateRunOpts(ro runOptions) error {
 	return nil
 }
 
-func signCollection(collection attestation.Collection, opts ...dsse.SignOption) (dsse.Envelope, error) {
+func SignCollection(collection attestation.Collection, opts ...dsse.SignOption) (dsse.Envelope, error) {
 	data, err := json.Marshal(&collection)
 	if err != nil {
 		return dsse.Envelope{}, err

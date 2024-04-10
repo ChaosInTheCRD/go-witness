@@ -51,10 +51,31 @@ type TrustBundler interface {
 type SignerOption func(*signerOptions)
 
 type signerOptions struct {
-	cert          *x509.Certificate
-	intermediates []*x509.Certificate
-	roots         []*x509.Certificate
-	hash          crypto.Hash
+	cert              *x509.Certificate
+	certPath          string
+	intermediates     []*x509.Certificate
+	intermediatePaths []string
+	roots             []*x509.Certificate
+	rootPaths         []string
+	hash              crypto.Hash
+}
+
+func SignWithCertificatePath(certPath string) SignerOption {
+	return func(so *signerOptions) {
+		so.certPath = certPath
+	}
+}
+
+func SignWithIntermediatePaths(intermediatePaths []string) SignerOption {
+	return func(so *signerOptions) {
+		so.intermediatePaths = intermediatePaths
+	}
+}
+
+func SignWithRootPaths(rootPaths []string) SignerOption {
+	return func(so *signerOptions) {
+		so.rootPaths = rootPaths
+	}
 }
 
 func SignWithCertificate(cert *x509.Certificate) SignerOption {
@@ -101,6 +122,49 @@ func NewSigner(priv interface{}, opts ...SignerOption) (Signer, error) {
 	default:
 		return nil, ErrUnsupportedKeyType{
 			t: fmt.Sprintf("%T", priv),
+		}
+	}
+
+	if options.certPath != "" {
+		if options.cert != nil {
+			return nil, fmt.Errorf("cannot specify both a certificate and a certificate path")
+		}
+
+		certs, err := TryParseCertsFromFile(options.certPath)
+		if err != nil {
+			return nil, fmt.Errorf("failed to parse certificate: %w", err)
+		}
+
+		if len(certs) > 1 {
+			return nil, fmt.Errorf("multiple certificates found in file %s", options.certPath)
+		}
+
+		options.cert = certs[0]
+
+		if options.intermediatePaths != nil {
+			certs := []*x509.Certificate{}
+			for _, path := range options.intermediatePaths {
+				c, err := TryParseCertsFromFile(path)
+				if err != nil {
+					return nil, fmt.Errorf("failed to parse intermediate certificate at path %s: %w", path, err)
+				}
+
+				certs = append(certs, c...)
+
+				options.intermediates = certs
+			}
+		}
+
+		if options.rootPaths != nil {
+			certs := []*x509.Certificate{}
+			for _, path := range options.rootPaths {
+				c, err := TryParseCertsFromFile(path)
+				if err != nil {
+					return nil, fmt.Errorf("failed to parse root certificate at path %s: %w", path, err)
+				}
+				certs = append(certs, c...)
+				options.roots = certs
+			}
 		}
 	}
 

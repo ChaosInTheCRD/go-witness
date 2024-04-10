@@ -23,6 +23,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"os"
 )
 
 // PEMType is a specific type for string constants used during PEM encoding and decoding
@@ -160,6 +161,29 @@ func TryParseKeyFromReader(r io.Reader) (interface{}, error) {
 	// we may want to handle files with multiple pem blocks in them, but for now...
 	pemBlock, _ := pem.Decode(bytes)
 	return TryParsePEMBlock(pemBlock)
+}
+
+func TryParseCertsFromFile(path string) ([]*x509.Certificate, error) {
+	f, err := os.ReadFile(path)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read certificate file at path %s: %w", path, err)
+	}
+
+	var blocks []byte
+	rest := f
+	for {
+		var block *pem.Block
+		block, rest = pem.Decode(rest)
+		if block == nil {
+			return nil, fmt.Errorf("failed to parse certificate: failed to parse PEM block in certificate")
+		}
+		blocks = append(blocks, block.Bytes...)
+		if len(rest) == 0 {
+			break
+		}
+	}
+
+	return x509.ParseCertificates(blocks)
 }
 
 func TryParseCertificate(data []byte) (*x509.Certificate, error) {

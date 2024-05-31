@@ -110,6 +110,7 @@ type gcpClient struct {
 
 type gcpClientOptions struct {
 	credentialsFile string
+	keyVersion      string
 }
 
 type Option func(*gcpClientOptions)
@@ -143,6 +144,33 @@ func (a *gcpClientOptions) Init() []registry.Configurer {
 				return ksp, nil
 			},
 		),
+		registry.StringConfigOption(
+			"key-version",
+			"The key version to use for signing",
+			"",
+			func(sp signer.SignerProvider, keyVersion string) (signer.SignerProvider, error) {
+				ksp, ok := sp.(*kms.KMSSignerProvider)
+				if !ok {
+					return sp, fmt.Errorf("provided signer provider is not a kms signer provider")
+				}
+
+				var clientOpts *gcpClientOptions
+				for _, opt := range ksp.Options {
+					co, optsOk := opt.(*gcpClientOptions)
+					if !optsOk {
+						continue
+					}
+					clientOpts = co
+				}
+
+				if clientOpts == nil {
+					return nil, fmt.Errorf("unable to find aws client options in aws kms signer provider")
+				}
+
+				WithKeyVersion(keyVersion)(clientOpts)
+				return ksp, nil
+			},
+		),
 	}
 }
 
@@ -154,6 +182,12 @@ func (*gcpClientOptions) ProviderName() string {
 func WithCredentialsFile(cred string) Option {
 	return func(opts *gcpClientOptions) {
 		opts.credentialsFile = cred
+	}
+}
+
+func WithKeyVersion(keyVersion string) Option {
+	return func(ksp *gcpClientOptions) {
+		ksp.keyVersion = keyVersion
 	}
 }
 

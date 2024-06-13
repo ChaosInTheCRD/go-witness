@@ -137,7 +137,13 @@ func run(stepName string, opts []RunOption) ([]RunResult, error) {
 					continue
 				}
 				if subjecter, ok := r.Attestor.(attestation.Subjecter); ok {
-					envelope, err := createAndSignEnvelope(r.Attestor, r.Attestor.Type(), subjecter.Subjects(), dsse.SignWithSigners(ro.signers...), dsse.SignWithTimestampers(ro.timestampers...))
+					subjects := subjecter.Subjects()
+					allSubjects := make(map[string]cryptoutil.DigestSet)
+					for subject, digest := range subjects {
+						allSubjects[fmt.Sprintf("%v/%v", r.Attestor.Type(), subject)] = digest
+					}
+
+					envelope, err := createAndSignEnvelope(r.Attestor, r.Attestor.Type(), allSubjects, dsse.SignWithSigners(ro.signers...), dsse.SignWithTimestampers(ro.timestampers...))
 					if err != nil {
 						return result, fmt.Errorf("failed to sign envelope: %w", err)
 					}

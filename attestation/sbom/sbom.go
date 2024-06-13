@@ -15,14 +15,20 @@
 package sbom
 
 import (
+	"bytes"
+	"crypto"
 	"encoding/json"
 	"fmt"
 	"io"
 	"os"
 
+	"github.com/CycloneDX/cyclonedx-go"
 	"github.com/in-toto/go-witness/attestation"
+	"github.com/in-toto/go-witness/cryptoutil"
 	"github.com/in-toto/go-witness/log"
+	"github.com/in-toto/go-witness/registry"
 	"github.com/invopop/jsonschema"
+	spdx "github.com/spdx/tools-golang/spdx"
 )
 
 const (
@@ -46,7 +52,22 @@ var (
 func init() {
 	attestation.RegisterAttestation(Name, Type, RunType, func() attestation.Attestor {
 		return NewSBOMAttestor()
-	})
+	},
+
+		registry.BoolConfigOption(
+			"export",
+			"Export the Link predicate in its own attestation",
+			false,
+			func(a attestation.Attestor, export bool) (attestation.Attestor, error) {
+				sbomAttestor, ok := a.(*SBOMAttestor)
+				if !ok {
+					return a, fmt.Errorf("unexpected attestor type: %T is not a Link provenance attestor", a)
+				}
+				WithExport(export)(sbomAttestor)
+				return sbomAttestor, nil
+			},
+		),
+	)
 }
 
 type Option func(*SBOMAttestor)
@@ -61,6 +82,7 @@ type SBOMAttestor struct {
 	SBOMDocument  interface{}
 	predicateType string
 	export        bool
+	subjects      map[string]string
 }
 
 func NewSBOMAttestor() *SBOMAttestor {
@@ -87,6 +109,20 @@ func (a *SBOMAttestor) Export() bool {
 
 func (a *SBOMAttestor) Schema() *jsonschema.Schema {
 	return jsonschema.Reflect(a)
+}
+
+func (a *SBOMAttestor) Subjects() map[string]cryptoutil.DigestSet {
+	subjects := make(map[string]cryptoutil.DigestSet)
+	hashes := []cryptoutil.DigestValue{{Hash: crypto.SHA256}}
+	for k, v := range a.subjects {
+		if ds, err := cryptoutil.CalculateDigestSetFromBytes([]byte(v), hashes); err == nil {
+			subjects[fmt.Sprintf("%s:%s", k, v)] = ds
+		} else {
+			log.Debugf("(attestation/sbom) failed to record %v subject: %w", k, err)
+		}
+	}
+
+	return subjects
 }
 
 func (a *SBOMAttestor) Attest(ctx *attestation.AttestationContext) error {
@@ -134,6 +170,39 @@ func (a *SBOMAttestor) getCandidate(ctx *attestation.AttestationContext) error {
 		sbomBytes, err := io.ReadAll(f)
 		if err != nil {
 			return fmt.Errorf("error reading file: %s", path)
+		}
+
+		a.subjects = make(map[string]string)
+		switch a.predicateType {
+		case SPDXPredicateType:
+			var document *spdx.Document
+			err := json.Unmarshal(sbomBytes, &document)
+			if err != nil {
+				return fmt.Errorf("error unmarshaling SPDX document: %w", err)
+			}
+
+			// NOTE: Getting the version from the SPDX document seemed pretty unclear, leaving it for now
+			if document.DocumentName != "" {
+				a.subjects["name"] = document.DocumentName
+			}
+		case CycloneDxPredicateType:
+			bom := cyclonedx.NewBOM()
+			decoder := cyclonedx.NewBOMDecoder(bytes.NewReader(sbomBytes), cyclonedx.BOMFileFormatJSON)
+			err := decoder.Decode(bom)
+			if err != nil {
+				return fmt.Errorf("error decoding CycloneDX BOM: %w", err)
+			}
+
+			if bom.Metadata.Component.Name != "" {
+				a.subjects["name"] = bom.Metadata.Component.Name
+			}
+
+			if bom.Metadata.Component.Version != "" {
+				a.subjects["version"] = bom.Metadata.Component.Name
+			}
+
+		default:
+			return fmt.Errorf("unsupported predicate type: %s", a.predicateType)
 		}
 
 		var sbomDocument interface{}
